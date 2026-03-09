@@ -17,27 +17,40 @@ USAGE_FILE="usage.json"
 KEY_FILE="keys.json"
 LOG_FILE="requests.log"
 
+MAX_DOWNLOAD_SIZE = 10 * 1024 * 1024
+DOWNLOAD_TIMEOUT = 10
+
 os.makedirs(CACHE_DIR,exist_ok=True)
 
-# ----------------------------------
-# Helper functions
-# ----------------------------------
+# ------------------------------
+# JSON helpers
+# ------------------------------
 
 def load_json(path):
     if not os.path.exists(path):
         return {}
-    with open(path,"r") as f:
-        return json.load(f)
+    try:
+        with open(path,"r") as f:
+            return json.load(f)
+    except:
+        return {}
 
 def save_json(path,data):
     with open(path,"w") as f:
         json.dump(data,f)
 
-API_KEYS=load_json(KEY_FILE)
+# ------------------------------
+# API Keys
+# ------------------------------
 
-# ----------------------------------
+API_KEYS = load_json(KEY_FILE) or {}
+
+if not isinstance(API_KEYS,dict):
+    API_KEYS={}
+
+# ------------------------------
 # Plans
-# ----------------------------------
+# ------------------------------
 
 PLANS={
     "free":10,
@@ -45,25 +58,25 @@ PLANS={
     "pro":1000
 }
 
-# ----------------------------------
+# ------------------------------
 # Logging
-# ----------------------------------
+# ------------------------------
 
 def log_request(ip,key):
     with open(LOG_FILE,"a") as f:
         f.write(f"{time.time()} {ip} {key}\n")
 
-# ----------------------------------
+# ------------------------------
 # Cache system
-# ----------------------------------
+# ------------------------------
 
 def cache_key(url,w,h):
     s=f"{url}_{w}_{h}"
     return hashlib.sha256(s.encode()).hexdigest()
 
-# ----------------------------------
-# Health
-# ----------------------------------
+# ------------------------------
+# Health endpoint
+# ------------------------------
 
 @app.route("/")
 def home():
@@ -72,9 +85,9 @@ def home():
         "status":"running"
     }
 
-# ----------------------------------
-# Register API key
-# ----------------------------------
+# ------------------------------
+# Register new API key
+# ------------------------------
 
 @app.route("/register",methods=["POST"])
 def register():
@@ -99,9 +112,9 @@ def register():
         "daily_limit":PLANS[plan]
     }
 
-# ----------------------------------
-# Stats
-# ----------------------------------
+# ------------------------------
+# Stats endpoint
+# ------------------------------
 
 @app.route("/stats")
 def stats():
@@ -125,9 +138,9 @@ def stats():
         "limit":API_KEYS[api_key]["limit"]
     }
 
-# ----------------------------------
+# ------------------------------
 # Resize endpoint
-# ----------------------------------
+# ------------------------------
 
 @app.route("/resize",methods=["GET","POST"])
 def resize():
@@ -156,9 +169,9 @@ def resize():
 
     log_request(request.remote_addr,api_key)
 
-    # ----------------------------------
+    # ------------------------------
     # GET method (URL resize)
-    # ----------------------------------
+    # ------------------------------
 
     if request.method=="GET":
 
@@ -176,26 +189,35 @@ def resize():
 
         cached=f"{CACHE_DIR}/{key}.jpg"
 
-        # Return cached image instantly
         if os.path.exists(cached):
             return send_file(cached,mimetype="image/jpeg")
 
         input_path=f"{TMP}/{uuid.uuid4()}.jpg"
 
         try:
-            r=requests.get(url,timeout=10)
+
+            r=requests.get(url,timeout=DOWNLOAD_TIMEOUT,stream=True)
+
+            size=0
 
             with open(input_path,"wb") as f:
-                f.write(r.content)
+                for chunk in r.iter_content(4096):
+
+                    size+=len(chunk)
+
+                    if size>MAX_DOWNLOAD_SIZE:
+                        return {"error":"image too large"},400
+
+                    f.write(chunk)
 
         except:
             return {"error":"failed to download image"},400
 
         output_path=cached
 
-    # ----------------------------------
+    # ------------------------------
     # POST method (upload resize)
-    # ----------------------------------
+    # ------------------------------
 
     else:
 
@@ -212,9 +234,9 @@ def resize():
 
         file.save(input_path)
 
-    # ----------------------------------
+    # ------------------------------
     # Call C resize engine
-    # ----------------------------------
+    # ------------------------------
 
     cmd=["./resize",input_path,output_path,str(w),str(h)]
 
@@ -225,7 +247,7 @@ def resize():
 
     return send_file(output_path,mimetype="image/jpeg")
 
-# ----------------------------------
+# ------------------------------
 
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=8080)

@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y gcc
 
 RUN gcc resize.c -o resize -lm
 
-RUN chmod +x /app/resize
+RUN chmod +x resize
 
 RUN pip install -r requirements.txt
 
